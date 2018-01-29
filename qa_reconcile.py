@@ -187,7 +187,7 @@ def reconcile_query(query, query_type=None,limit=3):
 def reconcile():
     #Single queries have been deprecated.  This can be removed.
     #Look first for form-param requests.
-
+    global_limit = request.args.get('limit')
     query = request.form.get('query')
     if query is None:
         #Then normal get param.s
@@ -199,26 +199,28 @@ def reconcile():
         if query.startswith("{"):
             query = json.loads(query)['query']
         query_type = request.args.get('type', 'types')
-        limit = query['limit']
-        return jsonpify({"result": reconcile_query(query,query_type,3)})
-    if limit is None:
-        limit = request.args.get('limit')
-    if limit is None:
-        limit = 3
+        global_limit = query['limit']
+        return jsonpify({"result": reconcile_query(query,query_type,global_limit)})
+    if global_limit is None:
+        global_limit = 3
     # If a 'queries' parameter is supplied then it is a dictionary
     # of (key, query) pairs representing a batch of queries. We
     # should return a dictionary of (key, results) pairs.
     queries = request.form.get('queries')
-    if queries is None:
-        queries = request.args.get('queries')
+#    if queries is None:
+#        queries = request.args.get('queries')
     if queries:
         queries = json.loads(queries)
         app.logger.error("QUERIES!!! : "+json.dumps(queries))
         results = {}
         for (key, query) in queries.items():
+            if query['limit']:
+                limit = query['limit']
+            else:
+                limit = global_limit
             auth = query.get("type")
             if auth is None: return jsonify(metadata)
-            result = reconcile_query(query,auth,3)
+            result = reconcile_query(query,auth,limit)
             results[key] = {"result":result}
             app.logger.error("setting key: "+key+" with query: "+json.dumps(query))
             app.logger.error("with result: "+json.dumps(result))      

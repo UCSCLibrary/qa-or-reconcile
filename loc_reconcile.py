@@ -184,7 +184,6 @@ def reconcile():
     queries = request.form.get('queries')
     if queries:
         queries = json.loads(queries)
-        app.logger.error("QUERIES!!! : "+json.dumps(queries))
         results = {}
         for (key, query) in queries.items():
             qtype = query.get('type')
