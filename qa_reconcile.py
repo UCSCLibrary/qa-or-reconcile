@@ -26,7 +26,6 @@ app = Flask(__name__)
 
 #some config
 base_url = 'http://digitalcollections-staging.library.ucsc.edu/authorities/search/'
-max_results = 20
 
 #If it's installed, use the requests_cache library to
 #cache calls to the API.
@@ -58,6 +57,8 @@ authority_names = {"loc":{"name":"Library of Congress",
                                       "aat":"Art and Architecture Thesaurus",
                                       "tgn":"Thesaurus of Geographic Names",
                                       "cona":"Cultural Objects Name Authority"}},
+           "geonames":{"name":"GeoNames",
+                       "subauthorities":{"":""}},
            "local":{"name":"Ucsc Local",
                     "subauthorities":{"names":"Names",
                                       "topics":"Topics",
@@ -78,11 +79,15 @@ def lowerfirst(x):
     return x[0].lower() + x[1:]
 
 def full_id(auth_name,subauth_name):
+    if subauth_name == "":
+        return auth_name
     return auth_name + upperfirst(subauth_name)
 
 def split_id(identifier):
     matches = re.finditer('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)', identifier)
     split = [m.group(0) for m in matches]
+    if len(split) < 2:
+        return identifier, ""
     auth_name = split[0]
     subauth_name = lowerfirst("".join(split[1:]))
     return auth_name, subauth_name
@@ -133,8 +138,6 @@ def search(raw_query, auth, subauth,limit):
     url += '?q=' + urllib.quote(query)
 
     try:
-        app.logger.debug("QA API url is " + url)
-        print('QA API url is : %s' % url)
         resp = requests.get(url)
         results = json.loads(resp.text)
     except Exception as e:
@@ -173,14 +176,12 @@ def search(raw_query, auth, subauth,limit):
     #Refine chooses how many matches to return.
     return sorted_out[:limit]
 
-def reconcile_query(query, query_type=None,limit=3):
-    if query_type is None:
+def reconcile_query(query, qtype=None,limit=3):
+    if qtype is None:
         qtype = query.get('type')
-    else:
-        qtype = query_type
     authority, subauthority = split_id(qtype)
     query_string = query if isinstance(query,basestring) else query['query']
-    app.logger.error("QUERY STRING:"+query_string)
+
     return search(query_string, authority, subauthority,limit)
 
 @app.route("/", methods=['POST', 'GET'])
@@ -189,17 +190,19 @@ def reconcile():
     #Look first for form-param requests.
     global_limit = request.args.get('limit')
     query = request.form.get('query')
+
     if query is None:
         #Then normal get param.s
         query = request.args.get('query')
     if query:
+        query_type = request.args.get('type', 'types')
         # If the 'query' param starts with a "{" then it is a JSON object
         # with the search string as the 'query' member. Otherwise,
         # the 'query' param is the search string itself.
         if query.startswith("{"):
-            query = json.loads(query)['query']
-        query_type = request.args.get('type', 'types')
-        global_limit = query['limit']
+            query = json.loads(query)
+            global_limit = query['limit']
+            query = query['query']
         return jsonpify({"result": reconcile_query(query,query_type,global_limit)})
     if global_limit is None:
         global_limit = 3
@@ -207,14 +210,11 @@ def reconcile():
     # of (key, query) pairs representing a batch of queries. We
     # should return a dictionary of (key, results) pairs.
     queries = request.form.get('queries')
-#    if queries is None:
-#        queries = request.args.get('queries')
     if queries:
         queries = json.loads(queries)
-        app.logger.error("QUERIES!!! : "+json.dumps(queries))
         results = {}
         for (key, query) in queries.items():
-            if query['limit']:
+            if "limit" in query:
                 limit = query['limit']
             else:
                 limit = global_limit

@@ -26,7 +26,7 @@ app = Flask(__name__)
 
 #some config
 base_url = 'http://digitalcollections-staging.library.ucsc.edu/authorities/search/'
-max_results = 20
+max_results = 25
 
 #If it's installed, use the requests_cache library to
 #cache calls to the API.
@@ -44,18 +44,23 @@ authority_names = {"ucsc":{"name":"UC Santa Cruz",
                   "subauthorities":{"names":"Names",
                                     "genres":"Genres",
                                     "formats":"Formats",
-#                                    "places":"Places",
+                                    "places":"Places",
                                     "times":"Time Periods",
-                                    "subjects":"All Subjects",
-                                    "subjectTopics":"Topical Subjects"}}}
+                                    "subjects_all":"All Subjects",
+                                    "subjects_topics":"Topical Subjects"}}}
 
-auth_mapping = {"names":["locNames","gettyUlan","localNames"],
-                "genres":["locGenreForms","gettyAat","localGenres"],
-                "formats":["gettyAat","localFormats"],
-#                "places":[],
-                "times":["gettyAat","localTimes"]
-                "subjects":["locNames","locSubjects","gettyUlan","gettyAat","localTopics","localNames","localPlaces","localTimes"],
-                "subjectTopics":["locSubjects","localTopics"],}
+auth_map = {"names":["locNames","gettyUlan","localNames"],
+#            "genres":["locGenreForms","gettyAat","localGenres"],
+            "genres":["locGenreForms","gettyAat"],
+#            "formats":["gettyAat","localFormats"],
+            "formats":["gettyAat"],
+            "places":["geonames","locSubjects"],
+#            "times":["gettyAat","localTimes"],
+            "times":["gettyAat"],
+#            "all_subject_headings":["locNames","locSubjects","gettyUlan","gettyAat","localTopics","localNames","localPlaces","localTimes"],
+            "subjects_all":["locNames","locSubjects","gettyUlan","gettyAat","localNames"],
+#            "subject_topics":["locSubjects","localTopics"]}
+            "subjects_topics":["locSubjects"]}
 
 #Map the query indexes to service types
 default_query = {
@@ -64,6 +69,17 @@ default_query = {
     "index": "suggestall"
 }
 
+# Basic service metadata. There are a number of other documented options
+# but this is all we need for a simple service.
+def default_types(auth_names):
+    types = []
+    for auth_id, auth in auth_names.iteritems():
+        for subauth_id, subauth_name in auth['subauthorities'].iteritems():
+            type_name = auth["name"]+" "+subauth_name
+            types.append({"id": subauth_id,
+                          "name": type_name})
+    return types
+        
 def upperfirst(x):
     return x[0].upper() + x[1:]
 
@@ -73,31 +89,27 @@ def lowerfirst(x):
 def full_id(auth_name,subauth_name):
     return auth_name + upperfirst(subauth_name)
 
-def split_id(identifier):
-    matches = re.finditer('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)', identifier)
-    split = [m.group(0) for m in matches]
-    auth_name = split[0]
-    subauth_name = lowerfirst("".join(split[1:]))
-    return auth_name, subauth_name
-
-def default_types(auth_names):
-    types = []
-    for auth_id, auth in auth_names.iteritems():
-        for subauth_id, subauth_name in auth['subauthorities'].iteritems():
-            type_name = auth["name"]+" "+subauth_name
-            types.append({"id": full_id(auth_id,subauth_id),
-                          "name": type_name})
-    return types
-
-# Basic service metadata. There are a number of other documented options
-# but this is all we need for a simple service.
 metadata = {
-    "name": "Questioning Authority Reconciliation Service",
+    "name": "UC Santa Cruz Custom Reconciliation Service",
     "defaultTypes": default_types(authority_names),
     "view": {
         "url": "{{id}}"
     }
 }
+
+def split_id(identifier):
+    if not identifier:
+        return "",""
+    matches = re.finditer('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)', identifier)
+    split = [m.group(0) for m in matches]
+    if len(split) < 2:
+        return identifier, ""
+    auth_name = split[0]
+    if len(split) < 2:
+        return identifier, identifier
+    subauth_name = lowerfirst("".join(split[1:]))
+    return auth_name, subauth_name
+
 
 def jsonpify(obj):
     """
@@ -111,75 +123,80 @@ def jsonpify(obj):
     except KeyError:
         return jsonify(obj)
 
-def search(raw_query, auth, subauth):
+def search(raw_query, authtype, limit=3):
     """
     Hit the QA API for names.
     """
     out = []
     unique_ids = []
     query = text.normalize(raw_query).strip()
-
-    full_name = authority_names[auth]["name"]+" "+authority_names[auth]["subauthorities"][subauth]
-    query_type_meta = [{"id": full_id(auth,subauth), "name": full_name}]
-
-    url = base_url+auth+"/"+subauth
-    url += '?q=' + urllib.quote(query)
-
-    try:
-        app.logger.debug("QA API url is " + url)
-        print('QA API url is : %s' % url)
-        resp = requests.get(url)
-        results = json.loads(resp.text)
-    except Exception as e:
-        app.logger.warning(e)
-        return out
     match = False
-    for position, item in enumerate(results):
-        if position > max_results or match: break
+    for qtype in auth_map[authtype]:
+        if match: break
 
-        uri = item["id"]
-        name = item["label"]
+        auth, subauth = split_id(qtype)
 
-        #Avoid returning many of the
-        #same result
-        if uri in unique_ids:
-            continue
-        else:
-            unique_ids.append(uri)
+        query_type_meta = [{"id": subauth, "name": authtype}]
 
-        score_1 = fuzz.token_sort_ratio(query, name)
-        score_2 = fuzz.token_sort_ratio(raw_query, name)
-        #Return a maximum score
-        score = max(score_1, score_2)
-        if query == text.normalize(name) or raw_query == text.normalize(name):
-            match = True
-        resource = {
-            "id": uri,
-            "name": name,
-            "score": score,
-            "match": match,
-            "type": query_type_meta
-        }
-        out.append(resource)
+        url = base_url+auth+"/"+subauth
+        url += '?q=' + urllib.quote(query)
+    
+        try:
+            resp = requests.get(url)
+            results = json.loads(resp.text)
+        except Exception as e:
+            app.logger.error(e)
+            sorted_out = sorted(out, key=itemgetter('score'), reverse=True)
+            return sorted_out[:int(limit)]
+
+        for position, item in enumerate(results):
+            if position > max_results or match: break
+
+            uri = item["id"]
+            name = item["label"]
+
+            #Avoid returning many of the
+            #same result
+            if uri in unique_ids:
+                continue
+            else:
+                unique_ids.append(uri)
+
+            score_1 = fuzz.token_sort_ratio(query, name)
+            score_2 = fuzz.token_sort_ratio(raw_query, name)
+
+            #Return a maximum score
+            score = max(score_1, score_2)
+            if query == text.normalize(name) or raw_query == text.normalize(name):
+                match = True
+            resource = {
+                "id": uri,
+                "name": name,
+                "score": score,
+                "match": match,
+                "type": query_type_meta
+            }
+            out.append(resource)
     #Sort this list by score
     sorted_out = sorted(out, key=itemgetter('score'), reverse=True)
-    #Refine only will handle top three matches.
-    return sorted_out[:3]
+    return sorted_out[:limit]
 
-def reconcile_query(query, query_type=None):
-    if query_type is None:
+def reconcile_query(query, qtype = None,limit=3):
+    if qtype is None:
         qtype = query.get('type')
-    else:
-        qtype = query_type
-    authority, subauthority = split_id(qtype)
+    #authority, subauthority = split_id(qtype)
+    subauthority = qtype
     query_string = query if isinstance(query,basestring) else query['query']
     app.logger.error("QUERY STRING:"+query_string)
-    return search(query_string, authority, subauthority)
+    app.logger.error("SUBAUTHORITY:"+subauthority)
+    app.logger.error("limit:"+str(limit))
+    return search(query_string, subauthority, limit)
 
 @app.route("/", methods=['POST', 'GET'])
 def reconcile():
     #Single queries have been deprecated.  This can be removed.
     #Look first for form-param requests.
+    global_limit = request.args.get('limit')
     query = request.form.get('query')
     if query is None:
         #Then normal get param.s
@@ -190,26 +207,31 @@ def reconcile():
         # the 'query' param is the search string itself.
         if query.startswith("{"):
             query = json.loads(query)['query']
+        limit = request.args.get("limit")
+        if limit is None:
+            limit = 3
         query_type = request.args.get('type', 'types')
-        return jsonpify({"result": reconcile_query(query,query_type)})
+        return jsonpify({"result": reconcile_query(query,query_type,limit)})
+    if global_limit is None:
+        global_limit = 3
     # If a 'queries' parameter is supplied then it is a dictionary
     # of (key, query) pairs representing a batch of queries. We
     # should return a dictionary of (key, results) pairs.
     queries = request.form.get('queries')
-    if queries is None:
-        queries = request.args.get('queries')
     if queries:
         queries = json.loads(queries)
-        app.logger.error("QUERIES!!! : "+json.dumps(queries))
         results = {}
         for (key, query) in queries.items():
+            if "limit" in query:
+                limit = query['limit']
+            else:
+                limit = global_limit
+            if limit is None:
+                limit = 3
             auth = query.get("type")
             if auth is None: return jsonify(metadata)
-            result = reconcile_query(query,auth)
+            result = reconcile_query(query,auth,limit)
             results[key] = {"result":result}
-            app.logger.error("setting key: "+key+" with query: "+json.dumps(query))
-            app.logger.error("with result: "+json.dumps(result))      
-        app.logger.error("!!!! ---- results:" + json.dumps(results))
         return jsonpify(results)
     # If neither a 'query' nor 'queries' parameter is supplied then
     # we should return the service metadata.

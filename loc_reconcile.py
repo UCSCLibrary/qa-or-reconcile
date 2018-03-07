@@ -24,7 +24,6 @@ app = Flask(__name__)
 
 #some config
 base_url = 'http://id.loc.gov/search/'
-max_results = 20
 
 #If it's installed, use the requests_cache library to
 #cache calls to the LOC API.
@@ -92,7 +91,7 @@ def jsonpify(obj):
     except KeyError:
         return jsonify(obj)
 
-def search(raw_query, query_type="subjects"):
+def search(raw_query, query_type="subjects", limit=3):
     """
     Hit the LOC API for names.
     """
@@ -106,8 +105,6 @@ def search(raw_query, query_type="subjects"):
         if query_type != "all":
             url += '&q=scheme:' + base_url.replace("search","authorities") + query_type
         url += '&q=' + urllib.quote(query)
-        app.logger.debug("LOC API url is " + url)
-        print('LOC API url is : %s' % url)
         resp = requests.get(url)
         results = json.loads(resp.text.lstrip('(').rstrip(');'))
     except Exception as e:
@@ -116,7 +113,7 @@ def search(raw_query, query_type="subjects"):
 
     match = False
     for position, item in enumerate(results):
-        if position > max_results or match: break
+        if match: break
         if not isinstance(item, list):
             continue
         if item[0] != "atom:entry":
@@ -158,13 +155,14 @@ def search(raw_query, query_type="subjects"):
     #Sort this list by score
     sorted_out = sorted(out, key=itemgetter('score'), reverse=True)
     #Refine only will handle top three matches.
-    return sorted_out[:3]
+    return sorted_out[:limit]
 
 
 @app.route("/", methods=['POST', 'GET'])
 def reconcile():
     #Single queries have been deprecated.  This can be removed.
     #Look first for form-param requests.
+    global_limit = request.args.get('limit')
     query = request.form.get('query')
     if query is None:
         #Then normal get param.s
@@ -175,9 +173,13 @@ def reconcile():
         # with the search string as the 'query' member. Otherwise,
         # the 'query' param is the search string itself.
         if query.startswith("{"):
-            query = json.loads(query)['query']
-        results = search(query, query_type=query_type)
+            query = json.loads(query)
+            global_limit = query['limit']
+            query = query['query']
+        results = search(query,query_type,global_limit)
         return jsonpify({"result": results})
+    if global_limit is None:
+        global_limit = 3
     # If a 'queries' parameter is supplied then it is a dictionary
     # of (key, query) pairs representing a batch of queries. We
     # should return a dictionary of (key, results) pairs.
@@ -186,13 +188,17 @@ def reconcile():
         queries = json.loads(queries)
         results = {}
         for (key, query) in queries.items():
+            if query['limit']:
+                limit = query['limit']
+            else:
+                limit = global_limit
             qtype = query.get('type')
             #If no type is specified this is likely to be the initial query
             #so lets return the service metadata so users can choose what
             # index to use.
             if qtype is None:
                 return jsonpify(metadata)
-            data = search(query['query'], query_type=qtype)
+            data = search(query['query'], qtype, limit)
             results[key] = {"result": data}
         return jsonpify(results)
     # If neither a 'query' nor 'queries' parameter is supplied then
