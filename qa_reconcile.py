@@ -177,7 +177,7 @@ def search(raw_query, auth, subauth,limit):
     #Refine chooses how many matches to return.
     return sorted_out[:limit]
 
-def reconcile_query(query, qtype=None,limit=3):
+def reconcile_query(query, qtype=None,limit=15):
     if qtype is None:
         qtype = query.get('type')
     authority, subauthority = split_id(qtype)
