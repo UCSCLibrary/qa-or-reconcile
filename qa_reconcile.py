@@ -25,7 +25,7 @@ import requests
 app = Flask(__name__)
 
 #some config
-base_url = 'http://digitalcollections.library.ucsc.edu/authorities/search/'
+base_url = os.environ['QA_BASE_URL']
 
 #If it's installed, use the requests_cache library to
 #cache calls to the API.
