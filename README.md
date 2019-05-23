@@ -11,7 +11,7 @@ The "Ucsc Reconciliation" endpoint is an attempt to allow for reconciliation of 
 However, this does not work consistently at the moment. The QA endpoint is more consistent.
 
 ## Installation
-First, the Python code in this repository must be run as a web server, either using Flask or Apache Passenger. Set the Questioning Authority url you want to use in the environment variable "QA_BASE_URL" (example: `SetEnv QA_BASE_URL http://digitalcollections.library.ucsc.edu/authorities/search/`). I leave this as an exercise for the reader.
+First, the Python code in this repository must be run as a web server, either using Flask or Apache Passenger. Set the Questioning Authority url you want to use in the environment variable "QA_BASE_URL" (example: `SetEnv QA_BASE_URL http://YOUR-DOMAIN-HERE/qa/search/`). I leave this as an exercise for the reader.
 
 Second, you must install an instance of OpenRefine, either as a shared service or locally on your own machine. The standard installation instructions for OpenRefine should work fine.
 
